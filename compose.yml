@@ -1,0 +1,29 @@
+services:
+  summary-runner:
+    build:
+      context: ./summary-runner
+      dockerfile: Dockerfile
+    environment:
+      YOUTUBE_API_KEY: "${YOUTUBE_API_KEY:-}"
+      YOUTUBE_CHANNEL_IDS: "${YOUTUBE_CHANNEL_IDS:-}"
+      YOUTUBE_MAX_RESULTS: "${YOUTUBE_MAX_RESULTS:-5}"
+      NEXOS_API_KEY: "${NEXOS_API_KEY:-}"
+      NEXOS_MODEL: "${NEXOS_MODEL:-GPT 5.4 (Public)}"
+      CAPTION_LANGUAGE: "${CAPTION_LANGUAGE:-en}"
+      ALLOW_AUTO_CAPTIONS: "${ALLOW_AUTO_CAPTIONS:-true}"
+      SLACK_BOT_TOKEN: "${SLACK_BOT_TOKEN:-}"
+      SLACK_CHANNEL: "${SLACK_CHANNEL:-}"
+      STATE_DB_PATH: "/data/state.db"
+      HF_HOME: "/models/huggingface"
+      XDG_CACHE_HOME: "/models/cache"
+      LOG_PATH: "/logs/runner.log"
+      HTTP_TIMEOUT_SECONDS: "${HTTP_TIMEOUT_SECONDS:-60}"
+    volumes:
+      - runner_data:/data
+      - whisper_models:/models
+      - runner_logs:/logs
+
+volumes:
+  runner_data:
+  whisper_models:
+  runner_logs:
