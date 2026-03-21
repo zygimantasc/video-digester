@@ -19,6 +19,7 @@ from faster_whisper import WhisperModel
 
 
 YOUTUBE_PLAYLIST_ITEMS_URL = "https://www.googleapis.com/youtube/v3/playlistItems"
+YOUTUBE_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 NEXOS_CHAT_URL = "https://api.nexos.ai/v1/chat/completions"
 _WHISPER_MODEL: WhisperModel | None = None
 _LOGGER: logging.Logger | None = None
@@ -33,6 +34,7 @@ class Video:
     description: str
     published_at: str
     video_url: str
+    duration_seconds: int | None = None
 
 
 @dataclass
@@ -168,6 +170,69 @@ def request_with_retries(method: str, url: str, **kwargs: Any) -> requests.Respo
     raise RuntimeError(f"Request failed without response for {method.upper()} {url}")
 
 
+def parse_iso8601_duration(raw: str) -> int | None:
+    match = re.fullmatch(
+        r"P(?:(?P<days>\d+)D)?(?:T(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?)?",
+        raw.strip(),
+    )
+    if not match:
+        return None
+    days = int(match.group("days") or 0)
+    hours = int(match.group("hours") or 0)
+    minutes = int(match.group("minutes") or 0)
+    seconds = int(match.group("seconds") or 0)
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+
+def format_duration(seconds: int) -> str:
+    days, remainder = divmod(seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, secs = divmod(remainder, 60)
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    if secs or not parts:
+        parts.append(f"{secs}s")
+    return " ".join(parts)
+
+
+def fetch_video_durations(
+    youtube_api_key: str, video_ids: list[str], timeout: int
+) -> dict[str, int | None]:
+    if not video_ids:
+        return {}
+    response = request_with_retries(
+        "get",
+        YOUTUBE_VIDEOS_URL,
+        params={
+            "part": "contentDetails",
+            "id": ",".join(video_ids),
+            "maxResults": len(video_ids),
+            "key": youtube_api_key,
+        },
+        timeout=timeout,
+    )
+    if response.status_code >= 500:
+        log_error(
+            f"[youtube] videos error {response.status_code} while loading durations for {len(video_ids)} videos"
+        )
+        return {}
+    response.raise_for_status()
+    durations: dict[str, int | None] = {}
+    for item in response.json().get("items", []):
+        video_id = (item.get("id") or "").strip()
+        if not video_id:
+            continue
+        durations[video_id] = parse_iso8601_duration(
+            item.get("contentDetails", {}).get("duration", "")
+        )
+    return durations
+
+
 def fetch_recent_videos(
     youtube_api_key: str, channel_id: str, max_results: int, timeout: int
 ) -> list[Video]:
@@ -222,8 +287,30 @@ def fetch_recent_videos(
                 video_url=f"https://www.youtube.com/watch?v={video_id}",
             )
         )
-    log(f"[youtube] fetched {len(videos)} videos for channel {channel_id}")
-    return videos
+    durations = fetch_video_durations(
+        youtube_api_key,
+        [video.video_id for video in videos],
+        timeout,
+    )
+    max_duration_seconds = int(os.getenv("MAX_VIDEO_DURATION_MINUTES", "40")) * 60
+    filtered_videos: list[Video] = []
+    skipped_for_duration = 0
+    for video in videos:
+        duration_seconds = durations.get(video.video_id)
+        video.duration_seconds = duration_seconds
+        if duration_seconds is not None and duration_seconds > max_duration_seconds:
+            skipped_for_duration += 1
+            log(
+                f"[youtube] skip {video.video_id}: duration {format_duration(duration_seconds)} exceeds "
+                f"max {format_duration(max_duration_seconds)}"
+            )
+            continue
+        filtered_videos.append(video)
+    log(
+        f"[youtube] fetched {len(filtered_videos)} videos for channel {channel_id}"
+        + (f" after skipping {skipped_for_duration} long videos" if skipped_for_duration else "")
+    )
+    return filtered_videos
 
 
 def filter_unprocessed(conn: sqlite3.Connection, videos: list[Video]) -> list[Video]:

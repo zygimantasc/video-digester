@@ -59,6 +59,7 @@ Required `.env` values:
 Optional:
 - `FALLBACK_CHANNEL_IDS=` optional separate channel list for random fallback; defaults to `YOUTUBE_CHANNEL_IDS`
 - `YOUTUBE_MAX_RESULTS=5` per channel, per run
+- `MAX_VIDEO_DURATION_MINUTES=40` skip videos longer than this
 - `RANDOM_FALLBACK_ENABLED=true`
 - `RANDOM_FALLBACK_POOL=50` recent videos per channel to consider when there are no new videos
 - `MIN_SUMMARIES_PER_RUN=3`
